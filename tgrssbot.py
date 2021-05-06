@@ -53,8 +53,7 @@ class TelegramRssBot:
             entries = [e for e in feed.entries if e.published_parsed > self.date_tuple]
             if entries:
                 for entry in reversed(entries):
-                    log.info(entry.title)
-                    log.info(entry.id)
+                    log.info(f"{entry.published} {entry.id}")
                     msg = f'<a style="color:red" href="{entry.link}"><b>{entry.title}</b></a>\n{entry.description}'
                     await self.bot.send_message(self.receiver_id, msg, parse_mode=ParseMode.HTML,
                                                 disable_web_page_preview=True)
