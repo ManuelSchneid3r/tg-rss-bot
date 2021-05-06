@@ -8,12 +8,10 @@ import time
 from signal import SIGINT, SIGTERM
 
 import aiogram
+import aiohttp
 import feedparser
 from aiogram import types
 from aiogram.types import ParseMode
-
-logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s')
-log = logging.getLogger()
 
 
 class TelegramRssBot:
@@ -30,15 +28,15 @@ class TelegramRssBot:
         self.read_date_tuple()
 
     def read_date_tuple(self):
-        log.debug(f"read_date_tuple")
+        logging.debug(f"read_date_tuple")
         try:
             with open(self.fn_date_tuple) as f:
                 self.date_tuple = tuple([int(t) for t in f.read().strip().split()])
         except Exception as e:  # whatever
-            log.debug(str(e))
+            logging.debug(str(e))
 
     def write_date_tuple(self):
-        log.debug(f"write_date_tuple")
+        logging.debug(f"write_date_tuple")
         with open(self.fn_date_tuple, mode='w') as f:
             f.write(" ".join([str(t) for t in self.date_tuple]))
 
@@ -46,30 +44,43 @@ class TelegramRssBot:
         msg = f"This bot is not interactive. It just sends items from {self.rss_url} to {self.receiver_id}."
         await message.answer(msg)
 
-    async def fetch_rss(self):
-        while True:
-            log.debug(f"fetch_rss")
-            feed = feedparser.parse(self.rss_url)
+    async def fetch_and_relay_rss(self):
+        logging.debug(f"fetch_rss")
+        async with aiohttp.request('GET', self.rss_url) as resp:
+            feed = feedparser.parse(await resp.text())
             entries = [e for e in feed.entries if e.published_parsed > self.date_tuple]
             if entries:
                 for entry in reversed(entries):
-                    log.info(f"{entry.published} {entry.id}")
+                    logging.info(f"{entry.published} {entry.id}")
                     msg = f'<a style="color:red" href="{entry.link}"><b>{entry.title}</b></a>\n{entry.description}'
                     await self.bot.send_message(self.receiver_id, msg, parse_mode=ParseMode.HTML,
                                                 disable_web_page_preview=True)
                     self.date_tuple = entry.published_parsed
                     self.write_date_tuple()
-            await asyncio.sleep(self.interval)
 
     async def run(self):
+        tg_task = asyncio.get_event_loop().create_task(self.dispatcher.start_polling())
+        rss_task = asyncio.get_event_loop().create_task(self.fetch_and_relay_rss())
         try:
-            poll_updates_task = asyncio.get_event_loop().create_task(self.dispatcher.start_polling())
-            fetch_rss_task = asyncio.get_event_loop().create_task(self.fetch_rss())
-            done, pending = await asyncio.wait({fetch_rss_task, poll_updates_task})
-            for p in pending:
-                p.cancel()
-                await asyncio.shield(p)
+            while True:
+                done, pending = await asyncio.wait({rss_task, tg_task}, timeout=self.interval,
+                                                   return_when=asyncio.FIRST_EXCEPTION)
+                if tg_task.done():
+                    logging.warning(str(tg_task.exception()))
+                    tg_task.cancel()
+                    tg_task = asyncio.get_event_loop().create_task(self.dispatcher.start_polling())
+                    await asyncio.sleep(self.interval)
+                elif rss_task.exception():
+                    logging.warning(str(rss_task.exception()))
+                    await asyncio.sleep(self.interval)
+                rss_task.cancel()
+                rss_task = asyncio.get_event_loop().create_task(self.fetch_and_relay_rss())
+        except asyncio.CancelledError:
+            pass
         finally:
+            tg_task.cancel()
+            rss_task.cancel()
+            await asyncio.shield(asyncio.wait({rss_task, tg_task}))
             await self.bot.close()
 
 
@@ -81,14 +92,15 @@ async def async_main():
     parser.add_argument('-i', '--interval', default='60')
     parser.add_argument('-v', '--verbose', action='count', default=0)
     args = parser.parse_args()
-    log.debug(args)
 
     if args.verbose > 1:
-        log.setLevel(logging.DEBUG)
+        logging.basicConfig(level=logging.DEBUG, format='%(asctime)s:%(name)s:%(levelname)s - %(message)s')
     elif args.verbose == 1:
-        log.setLevel(logging.INFO)
+        logging.basicConfig(level=logging.INFO, format='%(asctime)s:%(levelname)s - %(message)s')
     elif args.verbose == 0:
-        log.setLevel(logging.WARNING)
+        logging.basicConfig(level=logging.WARNING, format='%(asctime)s:%(levelname)s - %(message)s')
+
+    logging.debug(args)
 
     main_task = asyncio.ensure_future(TelegramRssBot(
         bot_token=args.bot_token,
@@ -104,7 +116,4 @@ async def async_main():
 
 
 if __name__ == '__main__':
-    try:
-        asyncio.run(async_main())
-    except asyncio.CancelledError:
-        pass
+    asyncio.run(async_main())
