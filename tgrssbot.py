@@ -70,7 +70,7 @@ class TelegramRssBot:
                     tg_task.cancel()
                     tg_task = asyncio.get_event_loop().create_task(self.dispatcher.start_polling())
                     await asyncio.sleep(self.interval)
-                elif rss_task.exception():
+                elif rss_task.done() and rss_task.exception():
                     logging.warning(str(rss_task.exception()))
                     await asyncio.sleep(self.interval)
                 rss_task.cancel()
