@@ -26,6 +26,7 @@ class TelegramRssBot:
         self.interval = interval
         self.date_tuple = tuple(time.gmtime())
         self.read_date_tuple()
+        self.old_ids = []
 
     def read_date_tuple(self):
         logging.debug(f"read_date_tuple")
@@ -48,7 +49,7 @@ class TelegramRssBot:
         logging.debug(f"fetch_rss")
         async with aiohttp.request('GET', self.rss_url) as resp:
             feed = feedparser.parse(await resp.text())
-            entries = [e for e in feed.entries if e.published_parsed > self.date_tuple]
+            entries = [e for e in feed.entries if e.published_parsed > self.date_tuple and e.id not in self.old_ids]
             if entries:
                 for entry in reversed(entries):
                     logging.info(f"{entry.published} {entry.id}")
@@ -57,6 +58,7 @@ class TelegramRssBot:
                                                 disable_web_page_preview=True)
                     self.date_tuple = entry.published_parsed
                     self.write_date_tuple()
+            self.old_ids = [e.id for e in feed.entries]
 
     async def run(self):
         tg_task = asyncio.get_event_loop().create_task(self.dispatcher.start_polling())
