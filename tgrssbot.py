@@ -11,7 +11,7 @@ import aiogram
 import aiohttp
 import feedparser
 from aiogram import types
-from aiogram.types import ParseMode
+from aiogram.enums import ParseMode
 
 
 class TelegramRssBot:
@@ -19,8 +19,8 @@ class TelegramRssBot:
 
     def __init__(self, bot_token: str, rss_url: str, receiver_id: str, interval: int):
         self.bot = aiogram.Bot(token=bot_token)
-        self.dispatcher = aiogram.Dispatcher(bot=self.bot)
-        self.dispatcher.register_message_handler(self.message_handler)
+        self.dispatcher = aiogram.Dispatcher()
+        self.dispatcher.message.register(self.message_handler)
         self.rss_url = rss_url
         self.receiver_id = receiver_id
         self.interval = interval
@@ -61,7 +61,7 @@ class TelegramRssBot:
             self.old_ids = [e.id for e in feed.entries]
 
     async def run(self):
-        tg_task = asyncio.get_event_loop().create_task(self.dispatcher.start_polling())
+        tg_task = asyncio.get_event_loop().create_task(self.dispatcher.start_polling(self.bot))
         rss_task = asyncio.get_event_loop().create_task(self.fetch_and_relay_rss())
         try:
             while True:
@@ -70,7 +70,7 @@ class TelegramRssBot:
                 if tg_task.done():
                     logging.warning(str(tg_task.exception()))
                     tg_task.cancel()
-                    tg_task = asyncio.get_event_loop().create_task(self.dispatcher.start_polling())
+                    tg_task = asyncio.get_event_loop().create_task(self.dispatcher.start_polling(self.bot))
                     await asyncio.sleep(self.interval)
                 elif rss_task.done() and rss_task.exception():
                     logging.warning(str(rss_task.exception()))
